@@ -1,5 +1,11 @@
 #TODO: Import your dependencies.
 #For instance, below are some dependencies you might need if you are using Pytorch
+import argparse
+import json
+import logging
+import os
+import sys
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -8,18 +14,10 @@ import torchvision
 import torchvision.models as models
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-import argparse
-import json
-import logging
-import os
-import sys
 import torch.optim as optim
 import torch.utils.data
-import torch.utils.data.distributed
 from torchvision import datasets, transforms, models
-from smdebug.pytorch import get_hook
-from sagemaker.pytorch import PyTorch
-import sagemaker
+
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -27,61 +25,72 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
-def test(model, test_loader, device):
+def test(model, test_loader):
     '''
     TODO: Complete this function that can take a model and a 
           testing data loader and will get the test accuray/loss of the model
           Remember to include any debugging/profiling hooks that you might need
     '''
+    logger.info("BEGIN TESTING")
+    model.to("cpu")
     model.eval()
     test_loss = 0
     correct = 0
     with torch.no_grad():
         for data, target in test_loader:
-            data = data.to(device) 
-            target = target.to(device)
             output = model(data)
-            test_loss += F.nll_loss(output, target, size_average=False).item()  
-            pred = output.max(1, keepdim=True)[1]  
+            test_loss += F.nll_loss(output, target, reduction="sum").item()  
+            pred = output.argmax(dim=1, keepdim=True)  
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
-    test_loss = (test_loss * (-1))
-    logger.info(f"Test set: Average loss: {test_loss:.4f}")
+    print("Test Loss: {test_loss:.4f}")
+    logger.info("TESTING ENDED")
 
-def train(model, train_loader, validation_loader, criterion, optimizer, epoch, device):
+def train(model, train_loader, validation_loader, criterion, optimizer, epochs, device):
     '''
     TODO: Complete this function that can take a model and
           data loaders for training and will get train the model
           Remember to include any debugging/profiling hooks that you might need
     '''
-    image_dataset={'train':train_loader, 'valid':validation_loader}
-
-    for batch_idx, (data, target) in enumerate(train_loader, 1):
-            data=data.to(device) # need to put data on GPU device
-            target=target.to(device)
+    logger.info("BEGIN TRAINING")
+    for i in range(epochs):
+        model.train()
+        train_loss = 0
+        for data, target in train_loader:
+            data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
-            output = model(data)
-            loss = F.nll_loss(output, target)
+            outputs = model(data)
+            loss = criterion(outputs, target)
             loss.backward()
             optimizer.step()
-            if batch_idx % 100 == 0:
-                logger.info(
-                    f"Train Epoch: {epoch}, Loss: {loss.item():.6f}"
-                )
-    return model 
+            train_loss += loss.item()
+
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for data, target in validation_loader:
+                data, target = data.to(device), target.to(device)
+                outputs = model(data)
+                loss = criterion(outputs, target)
+                val_loss += loss.item()
+        
+        print(f"Epoch {i}: Train Loss {train_loss:.3f}, Val Loss {val_loss:.3f}")
+    logger.info("TRAINING ENDED")
+
 
 def net():
     '''
     TODO: Complete this function that initializes your model
           Remember to use a pretrained model
     '''
-    model = models.resnet18(pretrained =True)
+    logger.info("INITIALIZE MODEL FOR FINETUNING")
+    model = models.resnet50(pretrained=True)
     for param in model.parameters():
         param.requies_grad = False
         
     num_features = model.fc.in_features
-    model.fc = nn.Sequential(nn.Linear(num_features,  133))
+    model.fc = nn.Linear(num_features,  133)
     
     return model
 
@@ -96,13 +105,15 @@ def create_data_loaders(data, batch_size):
     
     training_transform = transforms.Compose([
         transforms.RandomHorizontalFlip(),
-        transforms.Resize((224,224)),
+        transforms.Resize(255),
+        transforms.CenterCrop((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
     
     testing_transform = transforms.Compose([
-        transforms.Resize((224,224)),
+        transforms.Resize(255),
+        transforms.CenterCrop((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
@@ -123,9 +134,8 @@ def main(args):
     '''
     TODO: Initialize a model by calling the net function
     '''
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # need GPU to run
-
-    model=net()
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model = net()
     model = model.to(device)
     '''
     TODO: Create your loss and optimizer
@@ -138,18 +148,12 @@ def main(args):
     Remember that you will need to set up a way to get training data from S3
     '''
     train_loader, validation_loader, test_loader = create_data_loaders(args.data_dir, args.batch_size)
-    
-    for epoch in range(1, args.epochs+1):
-        model = train(model, train_loader, validation_loader, criterion, optimizer, epoch, device)
-        test(model, test_loader, device)
-    
-    
-    # model = train(model, train_loader, loss_criterion, optimizer)
-    
+    train(model, train_loader, validation_loader, criterion, optimizer, args.epochs, device)
+                     
     '''
     TODO: Test the model to see its accuracy
     '''
-    # test(model, test_loader, criterion)
+    test(model, test_loader)
     
     '''
     TODO: Save the trained model
@@ -175,15 +179,19 @@ if __name__=='__main__':
         type=int,
         default=2,
         metavar="N",
-        help="number of epochs to train (default: 14)",
+        help="number of epochs to train (default: 2)",
     )
     parser.add_argument(
-        "--lr", type=float, default=1.0, metavar="LR", help="learning rate (default: 1.0)"
+        "--lr", 
+        type=float, 
+        default=1.0, 
+        metavar="LR", 
+        help="learning rate (default: 1.0)"
     )
 
-    parser.add_argument("--data_dir", type=str, default=os.environ["SM_CHANNEL_TRAIN"])
-    parser.add_argument('--model_dir', type=str, default=os.environ['SM_MODEL_DIR'])
-    parser.add_argument('--output_dir', type=str, default=os.environ['SM_OUTPUT_DATA_DIR'])
-    args=parser.parse_args()
+    parser.add_argument("--data-dir", type=str, default=os.environ["SM_CHANNEL_TRAIN"])
+    parser.add_argument('--model-dir', type=str, default=os.environ['SM_MODEL_DIR'])
+    parser.add_argument('--output-dir', type=str, default=os.environ['SM_OUTPUT_DATA_DIR'])
+    args = parser.parse_args()
     
     main(args)

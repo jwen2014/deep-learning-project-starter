@@ -37,6 +37,7 @@ def test(model, test_loader,criterion, device, hook):
           testing data loader and will get the test accuray/loss of the model
           Remember to include any debugging/profiling hooks that you might need
     '''
+    logger.info("BEGIN TRAINING")
     model.eval()
     test_loss = 0
     correct = 0
@@ -44,15 +45,16 @@ def test(model, test_loader,criterion, device, hook):
         for data, target in test_loader:
             if hook:
                 hook.set_mode(modes.EVAL)
-            data=data.to(device) # need to put data on GPU device
+            data=data.to(device) 
             target=target.to(device)
             output = model(data)
-            test_loss += criterion(output, target)  # sum up batch loss
-            pred = output.max(1, keepdim=True)[1]  # get the index of the max log-probability
+            test_loss += criterion(output, target)  
+            pred = output.max(1, keepdim=True)[1]  
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
     logger.info(f"Test set: Average loss: {test_loss:.4f}")
+    logger.info("COMPLETE TRAINING")
 
 def train(model, train_loader, validation_loader, criterion, optimizer, epoch, device, hook):
     '''
@@ -60,6 +62,7 @@ def train(model, train_loader, validation_loader, criterion, optimizer, epoch, d
           data loaders for training and will get train the model
           Remember to include any debugging/profiling hooks that you might need
     '''
+    logger.info("BEGIN TRAINING")
     hook = get_hook(create_if_not_exists=True)
     if hook:
         hook.register_loss(criterion)
@@ -78,6 +81,7 @@ def train(model, train_loader, validation_loader, criterion, optimizer, epoch, d
                 logger.info(
                     f"Train Epoch: {epoch}, Loss: {loss.item():.6f}"
                 )
+    logger.info("COMPLETE TRAINING")
     return model 
 
 
@@ -140,8 +144,8 @@ def main(args):
     '''
     TODO: Create your loss and optimizer
     '''
-    criterion = nn.NLLLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.fc.parameters(), lr=args.lr, momentum=args.momentum)
     
     '''
     TODO: Call the train function to start training your model
@@ -183,7 +187,11 @@ if __name__=='__main__':
         help="number of epochs to train (default: 14)",
     )
     parser.add_argument(
-        "--lr", type=float, default=1.0, metavar="LR", help="learning rate (default: 1.0)"
+        "--lr", 
+        type=float, 
+        default=1.0, 
+        metavar="LR", 
+        help="learning rate (default: 1.0)"
     )
 
     parser.add_argument("--data_dir", type=str, default=os.environ["SM_CHANNEL_TRAIN"])
