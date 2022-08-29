@@ -27,7 +27,7 @@ hyperparameter_ranges = {
 ```
 
 #### Completed training jobs
-[]()
+![Training Jobs](imgs/training_jobs.png)
 
 #### Training metrics
 ```python
@@ -97,13 +97,6 @@ hyperparameter_ranges = {
 }
 ```
 
-
-Remember that your README should:
-- Include a screenshot of completed training jobs
-- Logs metrics during the training process
-- Tune at least two hyperparameters
-- Retrieve the best best hyperparameters from all your training jobs
-
 ## Debugging and Profiling
 During the model training, AWS Sagemaker debugger and profiler were employed for debugging and profilling purposes. They were configured as follows:
 ```python
@@ -127,13 +120,9 @@ debugger_config = DebuggerHookConfig(
 ```
 
 ### Results
-**TODO**: What are the results/insights did you get by profiling/debugging your model?
 From the profiler report, we can see that most of operator usage was spent on IO operations like "copy_" and "to" for both GPU and CPU. This makes sense as given that large amount of data were going through during the training process. 
 
 It's also noteworthy that GPUMemoryIncrease rule was triggered the most during our training, and thus we should consider choosing a larger instance type with more memory if footprint is close to maximum available memory. 
-
-**TODO** Remember to provide the profiler html/pdf file in your submission.
-
 
 ## Model Deployment
 The inference model is a Pytorch neural network model for dog breed classification tasks. Users can submit an inference request by passing an serialized image data of a size of 224. This can be done as the example below:
@@ -152,7 +141,7 @@ img_tensor = transform(image).unsqueeze(0)
 
 ```
 
-**TODO** Remember to provide a screenshot of the deployed active endpoint in Sagemaker.
+![Endpoints](imgs/endpoints.png)
 
 ## Standout Suggestions
 **TODO (Optional):** This is where you can provide information about any standout suggestions that you have attempted.
